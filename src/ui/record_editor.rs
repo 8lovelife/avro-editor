@@ -37,26 +37,25 @@ pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, 
         (Schema::String, EditValue::String(s)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", label));
-                ui.add(
-                    egui::TextEdit::singleline(s)
-                        .desired_width(120.0)
-                        .hint_text("Enter value...")
-                        .font(egui::TextStyle::Monospace),
-                );
+                ui.add(egui::TextEdit::singleline(s).desired_width(120.0));
             });
         }
-
         (Schema::Int, EditValue::Int(i)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", label));
                 ui.add(egui::DragValue::new(i));
             });
         }
-
         (Schema::Long, EditValue::Long(l)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", label));
                 ui.add(egui::DragValue::new(l));
+            });
+        }
+        (Schema::Float, EditValue::Float(f)) => {
+            ui.horizontal(|ui| {
+                ui.label(format!("{}:", label));
+                ui.add(egui::DragValue::new(f).speed(0.1));
             });
         }
         (Schema::Double, EditValue::Double(d)) => {
@@ -65,29 +64,69 @@ pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, 
                 ui.add(egui::DragValue::new(d).speed(0.1));
             });
         }
-
         (Schema::Boolean, EditValue::Boolean(b)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", label));
                 ui.checkbox(b, "");
             });
         }
-
-        (Schema::Enum(_), EditValue::Enum(current_idx, symbols)) => {
+        (
+            Schema::Enum(_),
+            EditValue::Enum {
+                index,
+                value: sym_val,
+            },
+        ) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", label));
                 egui::ComboBox::from_id_salt(label)
-                    .selected_text(&symbols[*current_idx])
+                    .selected_text(sym_val.as_str())
                     .show_ui(ui, |ui| {
-                        for (i, sym) in symbols.iter().enumerate() {
-                            ui.selectable_value(current_idx, i, sym);
+                        if let Schema::Enum(es) = schema {
+                            for (i, sym) in es.symbols.iter().enumerate() {
+                                if ui.selectable_value(index, i, sym).clicked() {
+                                    *sym_val = sym.clone();
+                                }
+                            }
                         }
                     });
             });
         }
 
+        (
+            Schema::Union(union_schema),
+            EditValue::Union {
+                index,
+                inner_schema,
+                value: inner_val,
+            },
+        ) => {
+            ui.horizontal(|ui| {
+                // ui.label("");
+                ui.label(format!("| {}:", label));
+                let mut selected = *index;
+                egui::ComboBox::from_id_salt(label)
+                    .selected_text(format!("{:?}", union_schema.variants()[selected]))
+                    .show_ui(ui, |ui| {
+                        for (i, var) in union_schema.variants().iter().enumerate() {
+                            ui.selectable_value(&mut selected, i, format!("{:?}", var));
+                        }
+                    });
+
+                if selected != *index {
+                    *index = selected;
+                    let new_variant_schema = union_schema.variants()[selected].clone();
+                    *inner_val = Box::new(generate_default_value(&new_variant_schema));
+                    *inner_schema = new_variant_schema;
+                }
+            });
+            ui.indent(label, |ui| {
+                render_editor(ui, inner_schema, inner_val, "Value");
+            });
+        }
+
         (Schema::Record(rect_schema), EditValue::Record(fields)) => {
-            egui::CollapsingHeader::new(format!("📦 Record: {}", label))
+            egui::CollapsingHeader::new(format!("Record: {}", label))
                 .default_open(true)
                 .show(ui, |ui| {
                     for (field_schema, (f_name, f_val)) in
@@ -99,75 +138,160 @@ pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, 
         }
 
         (Schema::Array(arr_schema), EditValue::Array(items)) => {
-            egui::CollapsingHeader::new(format!("📑 Array: {} ({})", label, items.len()))
+            egui::CollapsingHeader::new(format!("[ ] Array: {} ({})", label, items.len()))
                 .default_open(true)
                 .show(ui, |ui| {
                     let mut to_remove = None;
-
                     for (idx, item) in items.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             if ui.button("❌").clicked() {
                                 to_remove = Some(idx);
                             }
-                            ui.vertical(|ui| {
-                                render_editor(ui, &arr_schema.items, item, &format!("[{}]", idx));
-                            });
+                            render_editor(ui, &arr_schema.items, item, &format!("[{}]", idx));
                         });
-                        ui.separator();
                     }
-
                     if let Some(idx) = to_remove {
                         items.remove(idx);
                     }
-
-                    if ui.button("➕ Add Element / Record").clicked() {
-                        let new_item = generate_default_value(&arr_schema.items);
-                        items.push(new_item);
+                    if ui.button("➕ Add").clicked() {
+                        items.push(generate_default_value(&arr_schema.items));
                     }
                 });
         }
 
-        (Schema::Union(union_schema), EditValue::Union(current_idx, inner_val)) => {
+        (Schema::Map(map_schema), EditValue::Map(kvs)) => {
+            egui::CollapsingHeader::new(format!("{ } Map: {}", "{ }", label))
+                .default_open(true)
+                .show(ui, |ui| {
+                    let mut to_remove = None;
+                    for (i, (key, val)) in kvs.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.text_edit_singleline(key);
+                            render_editor(ui, &map_schema.types, val, "");
+                            if ui.button("🗑").clicked() {
+                                to_remove = Some(i);
+                            }
+                        });
+                    }
+                    if let Some(i) = to_remove {
+                        kvs.remove(i);
+                    }
+                    if ui.button("➕ Add Entry").clicked() {
+                        kvs.push((
+                            "new_key".to_string(),
+                            generate_default_value(&map_schema.types),
+                        ));
+                    }
+                });
+        }
+
+        (Schema::Bytes, EditValue::Bytes(b)) => {
+            ui.label(format!("{}: [Bytes length: {}]", label, b.len()));
+        }
+
+        (Schema::Fixed(_), EditValue::Fixed(size, b)) => {
+            ui.label(format!("{}: [Fixed size: {} bytes]", label, size));
+            ui.add(egui::TextEdit::singleline(&mut format!("{:?}", b)));
+        }
+
+        (Schema::Null, EditValue::Null) => {
+            ui.label(format!("{}:", label));
+            ui.weak("null");
+        }
+
+        (Schema::Uuid, EditValue::Uuid(s)) => {
             ui.horizontal(|ui| {
-                ui.label(format!("⌥ {}:", label));
-
-                let variants = union_schema.variants();
-                let mut selected = *current_idx;
-
-                egui::ComboBox::from_id_salt(label)
-                    .selected_text(format!("{:?}", variants[selected]))
-                    .show_ui(ui, |ui| {
-                        for (i, var) in variants.iter().enumerate() {
-                            ui.selectable_value(&mut selected, i, format!("{:?}", var));
-                        }
-                    });
-
-                if selected != *current_idx {
-                    *current_idx = selected;
-                    *inner_val = Box::new(generate_default_value(&variants[selected]));
-                }
-            });
-
-            ui.indent(label, |ui| {
-                render_editor(
-                    ui,
-                    &union_schema.variants()[*current_idx],
-                    inner_val,
-                    "Value",
+                ui.label(format!("{} (uuid):", label));
+                ui.add(
+                    egui::TextEdit::singleline(s)
+                        .desired_width(220.0)
+                        .hint_text("00000000-0000-0000-0000-000000000000"),
                 );
             });
         }
 
-        (Schema::Null, EditValue::Null) => {
+        // int + logicalType: date -> Schema::Date
+        (Schema::Date, EditValue::Date(days)) => {
             ui.horizontal(|ui| {
-                ui.label(format!("{}:", label));
-                ui.weak("null");
+                ui.label(format!("{} (date, epoch days):", label));
+                ui.add(egui::DragValue::new(days));
             });
         }
+
+        // int + logicalType: time-millis -> Schema::TimeMillis
+        (Schema::TimeMillis, EditValue::TimeMillis(ms)) => {
+            ui.horizontal(|ui| {
+                ui.label(format!("{} (time-millis):", label));
+                ui.add(egui::DragValue::new(ms));
+            });
+        }
+
+        // long + logicalType: time-micros -> Schema::TimeMicros
+        (Schema::TimeMicros, EditValue::TimeMicros(us)) => {
+            ui.horizontal(|ui| {
+                ui.label(format!("{} (time-micros):", label));
+                ui.add(egui::DragValue::new(us));
+            });
+        }
+
+        // long + logicalType: timestamp-millis -> Schema::TimestampMillis
+        (Schema::TimestampMillis, EditValue::TimestampMillis(ms)) => {
+            ui.horizontal(|ui| {
+                ui.label(format!("{} (timestamp-millis):", label));
+                ui.add(egui::DragValue::new(ms));
+            });
+        }
+
+        // long + logicalType: timestamp-micros -> Schema::TimestampMicros
+        (Schema::TimestampMicros, EditValue::TimestampMicros(us)) => {
+            ui.horizontal(|ui| {
+                ui.label(format!("{} (timestamp-micros):", label));
+                ui.add(egui::DragValue::new(us));
+            });
+        }
+
+        // fixed(size=12) + logicalType: duration -> Schema::Duration
+        (Schema::Duration, EditValue::Duration(bytes)) => {
+            ui.vertical(|ui| {
+                ui.label(format!("{} (duration, 12 bytes):", label));
+                let months = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                let days = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+                let millis = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+
+                let mut m = months;
+                let mut d = days;
+                let mut ms = millis;
+
+                ui.horizontal(|ui| {
+                    ui.label("months:");
+                    if ui.add(egui::DragValue::new(&mut m)).changed() {
+                        bytes[0..4].copy_from_slice(&m.to_le_bytes());
+                    }
+                    ui.label("days:");
+                    if ui.add(egui::DragValue::new(&mut d)).changed() {
+                        bytes[4..8].copy_from_slice(&d.to_le_bytes());
+                    }
+                    ui.label("millis:");
+                    if ui.add(egui::DragValue::new(&mut ms)).changed() {
+                        bytes[8..12].copy_from_slice(&ms.to_le_bytes());
+                    }
+                });
+            });
+        }
+
+        // bytes/fixed + logicalType: decimal -> Schema::Decimal(DecimalSchema)
+        (Schema::Decimal(decimal_schema), EditValue::Decimal(bytes)) => {
+            ui.label(format!(
+                "{} (decimal, precision={}, scale={}): [{} bytes]",
+                label,
+                decimal_schema.precision,
+                decimal_schema.scale,
+                bytes.len()
+            ));
+        }
+
         _ => {
-            ui.label(
-                egui::RichText::new("⚠️ State desync with Schema").color(egui::Color32::YELLOW),
-            );
+            ui.label(egui::RichText::new("⚠️ Type Mismatch").color(egui::Color32::YELLOW));
         }
     }
 }

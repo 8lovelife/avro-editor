@@ -21,16 +21,16 @@ fn main() -> eframe::Result<()> {
     let schema = get_schema();
     let initial_record = generate_default_value(&schema);
     let root_records = vec![initial_record];
+
+    let state = AppState {
+        schema,
+        root_records,
+        toast_message: None,
+        toast_timer: 0.0,
+    };
     eframe::run_native(
         "Avro Editor",
         eframe::NativeOptions::default(),
-        Box::new(|_| {
-            Ok(Box::new(AvroEditorApp {
-                state: AppState {
-                    schema,
-                    root_records,
-                },
-            }))
-        }),
+        Box::new(|_cc| Ok(Box::new(AvroEditorApp { state }))),
     )
 }
