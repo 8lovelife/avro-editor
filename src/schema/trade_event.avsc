@@ -1,0 +1,82 @@
+{
+    "type": "record",
+    "name": "TradeExecutionEvent",
+    "namespace": "com.quantedge.pipeline",
+    "fields": [
+        {"name": "event_id", "type": "string"},
+        {"name": "timestamp_ms", "type": "long"},
+        {
+            "name": "instrument",
+            "type": {
+                "type": "record",
+                "name": "InstrumentDef",
+                "fields": [
+                    {"name": "symbol", "type": "string"},
+                    {
+                        "name": "exchange",
+                        "type": {
+                            "type": "enum",
+                            "name": "ExchangeCode",
+                            "symbols": ["NYSE", "NASDAQ", "CME", "BINANCE"]
+                        }
+                    },
+                    {
+                        "name": "asset_class",
+                        "type": {
+                            "type": "enum",
+                            "name": "AssetClass",
+                            "symbols": ["EQUITY", "DERIVATIVE", "CRYPTO"]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "order_details",
+            "type": {
+                "type": "record",
+                "name": "OrderDetails",
+                "fields": [
+                    {"name": "order_id", "type": "string"},
+                    {"name": "price", "type": "double"},
+                    {"name": "quantity", "type": "double"},
+                    {
+                        "name": "is_maker",
+                        "type": ["null", "boolean"],
+                        "default": null
+                    }
+                ]
+            }
+        },
+        {
+            "name": "allocations",
+            "doc": "多账户资金/数量分配明细",
+            "type": {
+                "type": "array",
+                "items": {
+                    "type": "record",
+                    "name": "AccountAllocation",
+                    "fields": [
+                        {"name": "account_id", "type": "string"},
+                        {"name": "allocated_qty", "type": "double"},
+                        {
+                            "name": "sub_account_info",
+                            "doc": "子账户信息（如果有的话）",
+                            "type": [
+                                "null",
+                                {
+                                    "type": "record",
+                                    "name": "SubAccount",
+                                    "fields": [
+                                        {"name": "sub_id", "type": "string"},
+                                        {"name": "margin_ratio", "type": "double"}
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}
