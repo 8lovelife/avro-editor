@@ -58,8 +58,39 @@ mod tests {
     use std::io::BufReader;
 
     #[test]
+    fn test_extract_avro_file_schema() {
+        let test_avro = "test_random.avro";
+
+        // Open the Avro file and wrap it in a BufReader for performance
+        let file = File::open(test_avro).expect("Failed to open file");
+        let reader = BufReader::new(file);
+
+        // Create the Avro reader. This parses the file header and extracts the schema.
+        let avro_reader = Reader::new(reader).expect("Failed to create Reader");
+
+        // Extract the embedded schema from the file
+        let schema = avro_reader.writer_schema();
+
+        // Serialize the Schema object into a formatted JSON string (AVSC format)
+        // Note: You must have `serde_json` in your Cargo.toml dependencies
+        let avsc_string =
+            serde_json::to_string_pretty(schema).expect("Failed to serialize schema to JSON");
+
+        println!("Successfully extracted Schema:\n{}", avsc_string);
+
+        // Assert that the schema is valid and contains typical JSON characters
+        assert!(
+            avsc_string.contains("{"),
+            "The extracted schema should be a valid JSON object"
+        );
+
+        // Optional: Write the extracted schema directly to an .avsc file
+        std::fs::write("extracted_schema.avsc", &avsc_string).expect("Failed to write avsc file");
+    }
+
+    #[test]
     fn test_read_existing_avro_file() {
-        let file_path = "/Users/marycheng/Project/source/avro-editor/20260718_205125_InY22C.avro";
+        let file_path = "test_random.avro";
         let file = File::open(file_path).expect("Failed to open avro file");
         let reader = BufReader::new(file);
         let avro_reader = Reader::new(reader).expect("Failed to create Avro reader");

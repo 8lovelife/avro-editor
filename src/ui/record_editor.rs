@@ -33,6 +33,12 @@ pub fn render_root_list(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, label: &str) {
+    ui.push_id(label, |ui| {
+        render_editor_body(ui, schema, value, label);
+    });
+}
+
+fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, label: &str) {
     match (schema, value) {
         (Schema::String, EditValue::String(s)) => {
             ui.horizontal(|ui| {
@@ -79,7 +85,7 @@ pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, 
         ) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", label));
-                egui::ComboBox::from_id_salt(label)
+                egui::ComboBox::from_id_salt(ui.id())
                     .selected_text(sym_val.as_str())
                     .show_ui(ui, |ui| {
                         if let Schema::Enum(es) = schema {
@@ -105,7 +111,7 @@ pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, 
                 // ui.label("");
                 ui.label(format!("| {}:", label));
                 let mut selected = *index;
-                egui::ComboBox::from_id_salt(label)
+                egui::ComboBox::from_id_salt(ui.id())
                     .selected_text(format!("{:?}", union_schema.variants()[selected]))
                     .show_ui(ui, |ui| {
                         for (i, var) in union_schema.variants().iter().enumerate() {
@@ -127,6 +133,7 @@ pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, 
 
         (Schema::Record(rect_schema), EditValue::Record(fields)) => {
             egui::CollapsingHeader::new(format!("Record: {}", label))
+                .id_salt(ui.id())
                 .default_open(true)
                 .show(ui, |ui| {
                     for (field_schema, (f_name, f_val)) in
@@ -139,6 +146,7 @@ pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, 
 
         (Schema::Array(arr_schema), EditValue::Array(items)) => {
             egui::CollapsingHeader::new(format!("[ ] Array: {} ({})", label, items.len()))
+                .id_salt(ui.id())
                 .default_open(true)
                 .show(ui, |ui| {
                     let mut to_remove = None;
@@ -162,12 +170,13 @@ pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, 
         (Schema::Map(map_schema), EditValue::Map(kvs)) => {
             egui::CollapsingHeader::new(format!("{ } Map: {}", "{ }", label))
                 .default_open(true)
+                .id_salt(ui.id())
                 .show(ui, |ui| {
                     let mut to_remove = None;
                     for (i, (key, val)) in kvs.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             ui.text_edit_singleline(key);
-                            render_editor(ui, &map_schema.types, val, "");
+                            render_editor(ui, &map_schema.types, val, &format!("[{}]", i));
                             if ui.button("🗑").clicked() {
                                 to_remove = Some(i);
                             }
@@ -189,9 +198,22 @@ pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, 
             ui.label(format!("{}: [Bytes length: {}]", label, b.len()));
         }
 
-        (Schema::Fixed(_), EditValue::Fixed(size, b)) => {
-            ui.label(format!("{}: [Fixed size: {} bytes]", label, size));
-            ui.add(egui::TextEdit::singleline(&mut format!("{:?}", b)));
+        (Schema::Fixed(fixed_schema), EditValue::Fixed(size, b)) => {
+            if *size != fixed_schema.size || b.len() != fixed_schema.size {
+                *size = fixed_schema.size;
+                b.resize(fixed_schema.size, 0);
+            }
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("{} (fixed[{}]):", label, size));
+                for byte in b.iter_mut() {
+                    ui.add(
+                        egui::DragValue::new(byte)
+                            .range(0..=255)
+                            .hexadecimal(2, false, true),
+                    );
+                }
+            });
         }
 
         (Schema::Null, EditValue::Null) => {

@@ -2,7 +2,7 @@ use crate::data::types::EditValue;
 use apache_avro::Schema;
 use apache_avro::types::Value;
 
-const RAW_SCHEMA: &str = include_str!("deep_nested_all_types.avsc");
+const RAW_SCHEMA: &str = include_str!("sample_schema.avsc");
 
 pub fn get_schema() -> Schema {
     Schema::parse_str(RAW_SCHEMA).expect("Failed to parse schema from file")
