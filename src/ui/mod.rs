@@ -2,6 +2,7 @@ pub mod record_editor;
 pub mod record_preview;
 pub mod schema_explorer;
 
+use crate::data::avro_io;
 use crate::data::avro_io::generate_filename;
 use crate::schema::{self, parser};
 use crate::state::app_state::AppState;
@@ -21,7 +22,7 @@ pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
                         .add_filter("Avro", &["avro"])
                         .save_file()
                     {
-                        match crate::data::avro_io::export_to_avro_at_path(state, path) {
+                        match avro_io::export_to_avro_at_path(state, path) {
                             Ok(p) => {
                                 state.toast_message = Some(format!("✅ Saved to: {}", p));
                                 state.toast_timer = 3.0;
@@ -71,6 +72,25 @@ pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
                             Err(e) => {
                                 // File read failed (e.g., permission issues)
                                 state.toast_message = Some(format!("Failed to read file: {}", e));
+                                state.toast_timer = 5.0;
+                            }
+                        }
+                    }
+                }
+
+                if ui.button("📥 Load Avro File (.avro)").clicked() {
+                    if let Some(path) = FileDialog::new()
+                        .add_filter("Avro Data", &["avro"])
+                        .pick_file()
+                    {
+                        match avro_io::import_from_avro_at_path(state, path) {
+                            Ok(summary) => {
+                                state.toast_message = Some(format!("✅ Avro Loaded: {}", summary));
+                                state.toast_timer = 3.0;
+                            }
+                            Err(e) => {
+                                state.toast_message =
+                                    Some(format!("❌ Failed to load avro: {}", e));
                                 state.toast_timer = 5.0;
                             }
                         }
