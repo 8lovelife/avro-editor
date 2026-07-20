@@ -9,6 +9,7 @@ use crate::state::app_state::AppState;
 use apache_avro::Schema;
 use eframe::egui;
 use rfd::FileDialog;
+use std::collections::HashMap;
 use std::fs;
 
 pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
@@ -48,10 +49,11 @@ pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
                                 match Schema::parse_str(&content) {
                                     Ok(new_schema) => {
                                         // Successfully parsed! Update the application state
-                                        state.schema = new_schema;
-
+                                        state.schema = new_schema.clone();
+                                        let mut lookup = HashMap::new();
+                                        parser::collect_named_schemas(&new_schema, &mut lookup);
                                         let initial_record =
-                                            parser::generate_default_value(&state.schema);
+                                            parser::generate_default_value(&state.schema, &lookup);
                                         state.root_records = vec![initial_record];
 
                                         // Notify user of success

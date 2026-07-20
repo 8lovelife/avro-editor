@@ -1,14 +1,45 @@
 use crate::data::types::EditValue;
 use apache_avro::Schema;
+use apache_avro::schema::Name;
 use apache_avro::types::Value;
+use std::collections::HashMap;
 
 const RAW_SCHEMA: &str = include_str!("sample_schema.avsc");
 
 pub fn get_schema() -> Schema {
     Schema::parse_str(RAW_SCHEMA).expect("Failed to parse schema from file")
 }
+
+/// Recursively builds a lookup table of all named schemas (Records, Enums, Fixed)
+/// to resolve `Schema::Ref` later.
+pub fn collect_named_schemas(schema: &Schema, map: &mut HashMap<Name, Schema>) {
+    match schema {
+        Schema::Record(r) => {
+            map.insert(r.name.clone(), schema.clone());
+            for f in &r.fields {
+                collect_named_schemas(&f.schema, map);
+            }
+        }
+        Schema::Enum(e) => {
+            map.insert(e.name.clone(), schema.clone());
+        }
+        Schema::Fixed(f) => {
+            map.insert(f.name.clone(), schema.clone());
+        }
+        Schema::Array(a) => collect_named_schemas(&a.items, map),
+        Schema::Map(m) => collect_named_schemas(&m.types, map),
+        Schema::Union(u) => {
+            for v in u.variants() {
+                collect_named_schemas(v, map);
+            }
+        }
+        // Schema::Ref does not contain nested schemas, so no infinite recursion here
+        _ => {}
+    }
+}
+
 /// Generates a default `EditValue` based on the provided Avro Schema.
-pub fn generate_default_value(schema: &Schema) -> EditValue {
+pub fn generate_default_value(schema: &Schema, lookup: &HashMap<Name, Schema>) -> EditValue {
     match schema {
         // --- 1. Primitive Types ---
         Schema::Null => EditValue::Null,
@@ -36,7 +67,7 @@ pub fn generate_default_value(schema: &Schema) -> EditValue {
         Schema::Record(record_schema) => {
             let mut fields = Vec::new();
             for field in &record_schema.fields {
-                let default_val = generate_default_value(&field.schema);
+                let default_val = generate_default_value(&field.schema, lookup);
                 fields.push((field.name.clone(), default_val));
             }
             EditValue::Record(fields)
@@ -58,11 +89,24 @@ pub fn generate_default_value(schema: &Schema) -> EditValue {
             EditValue::Union {
                 index: 0,
                 inner_schema: first_schema.clone(),
-                value: Box::new(generate_default_value(first_schema)),
+                value: Box::new(generate_default_value(first_schema, lookup)),
             }
         }
 
-        // --- 3. Logical Types ---
+        // --- 3. Named Schema References ---
+        Schema::Ref { name } => {
+            if let Some(resolved_schema) = lookup.get(name) {
+                generate_default_value(resolved_schema, lookup)
+            } else {
+                eprintln!(
+                    "Warning: Unresolved schema reference during default generation: {:?}",
+                    name
+                );
+                EditValue::Null
+            }
+        }
+
+        // --- 4. Logical Types ---
         Schema::Uuid => EditValue::Uuid(String::new()),
         Schema::Date => EditValue::Date(0),
         Schema::TimeMillis => EditValue::TimeMillis(0),
@@ -70,18 +114,20 @@ pub fn generate_default_value(schema: &Schema) -> EditValue {
         Schema::TimestampMillis => EditValue::TimestampMillis(0),
         Schema::TimestampMicros => EditValue::TimestampMicros(0),
         Schema::Duration => EditValue::Duration([0u8; 12]),
-        Schema::Decimal(_) => EditValue::Decimal(Vec::new()),
-
-        // --- 4. Fallback ---
+        Schema::Decimal(_) => EditValue::Decimal(vec![0]),
+        // --- 5. Fallback ---
         _ => {
-            // If there's an unrecognized or highly nested logical type, fall back safely.
             eprintln!("Warning: Unhandled schema type: {:?}", schema);
             EditValue::Null
         }
     }
 }
 
-pub fn from_avro_value(value: &Value, schema: &Schema) -> EditValue {
+pub fn from_avro_value(
+    value: &Value,
+    schema: &Schema,
+    lookup: &HashMap<Name, Schema>,
+) -> EditValue {
     match (schema, value) {
         (Schema::Null, Value::Null) => EditValue::Null,
         (Schema::Boolean, Value::Boolean(b)) => EditValue::Boolean(*b),
@@ -106,7 +152,7 @@ pub fn from_avro_value(value: &Value, schema: &Schema) -> EditValue {
             let variant_schema = union_schema.variants()[*idx as usize].clone();
             EditValue::Union {
                 index: *idx as usize,
-                value: Box::new(from_avro_value(inner, &variant_schema)),
+                value: Box::new(from_avro_value(inner, &variant_schema, lookup)),
                 inner_schema: variant_schema,
             }
         }
@@ -114,7 +160,7 @@ pub fn from_avro_value(value: &Value, schema: &Schema) -> EditValue {
         (Schema::Array(arr_schema), Value::Array(items)) => {
             let converted = items
                 .iter()
-                .map(|v| from_avro_value(v, &arr_schema.items))
+                .map(|v| from_avro_value(v, &arr_schema.items, lookup))
                 .collect();
             EditValue::Array(converted)
         }
@@ -122,7 +168,7 @@ pub fn from_avro_value(value: &Value, schema: &Schema) -> EditValue {
         (Schema::Map(map_schema), Value::Map(kvs)) => {
             let converted = kvs
                 .iter()
-                .map(|(k, v)| (k.clone(), from_avro_value(v, &map_schema.types)))
+                .map(|(k, v)| (k.clone(), from_avro_value(v, &map_schema.types, lookup)))
                 .collect();
             EditValue::Map(converted)
         }
@@ -133,11 +179,21 @@ pub fn from_avro_value(value: &Value, schema: &Schema) -> EditValue {
                 let converted = fields
                     .iter()
                     .find(|(name, _)| name == &field_schema.name)
-                    .map(|(_, v)| from_avro_value(v, &field_schema.schema))
-                    .unwrap_or_else(|| generate_default_value(&field_schema.schema));
+                    .map(|(_, v)| from_avro_value(v, &field_schema.schema, lookup))
+                    .unwrap_or_else(|| generate_default_value(&field_schema.schema, lookup));
                 result.push((field_schema.name.clone(), converted));
             }
             EditValue::Record(result)
+        }
+
+        // --- Handle Named References ---
+        (Schema::Ref { name }, val) => {
+            if let Some(resolved_schema) = lookup.get(name) {
+                from_avro_value(val, resolved_schema, lookup)
+            } else {
+                eprintln!("Warning: Unresolved schema reference: {:?}", name);
+                generate_default_value(schema, lookup)
+            }
         }
 
         (Schema::Uuid, Value::Uuid(u)) => EditValue::Uuid(u.to_string()),
@@ -159,11 +215,8 @@ pub fn from_avro_value(value: &Value, schema: &Schema) -> EditValue {
         }
 
         (Schema::Decimal(_), Value::Decimal(d)) => {
-            eprintln!(
-                "Warning: Decimal import is a placeholder, verify apache_avro::Decimal API: {:?}",
-                d
-            );
-            EditValue::Decimal(Vec::new())
+            let bytes = <Vec<u8>>::try_from(d.clone()).unwrap_or_else(|_| vec![0]);
+            EditValue::Decimal(bytes)
         }
 
         (schema, _) => {
@@ -171,7 +224,7 @@ pub fn from_avro_value(value: &Value, schema: &Schema) -> EditValue {
                 "Warning: schema/value mismatch while importing avro file, schema={:?}",
                 schema
             );
-            generate_default_value(schema)
+            generate_default_value(schema, lookup)
         }
     }
 }

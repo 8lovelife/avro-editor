@@ -2,6 +2,7 @@ use crate::schema::parser;
 use crate::state::app_state::AppState;
 use apache_avro::Reader;
 use rand::distr::{Alphanumeric, SampleString};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -13,15 +14,20 @@ pub fn import_from_avro_at_path(state: &mut AppState, path: PathBuf) -> Result<S
 
     let schema = reader.writer_schema().clone();
 
+    // Build the schema lookup map to resolve recursive/reference structures
+    let mut lookup = HashMap::new();
+    parser::collect_named_schemas(&schema, &mut lookup);
+
     let mut records = Vec::new();
     for value_result in reader {
         let value = value_result.map_err(|e| format!("Failed to read avro records: {}", e))?;
-        records.push(parser::from_avro_value(&value, &schema));
+        records.push(parser::from_avro_value(&value, &schema, &lookup));
     }
 
     let count = records.len();
     state.schema = schema;
     state.root_records = records;
+    state.schema_lookup = lookup;
 
     let file_name = path
         .file_name()

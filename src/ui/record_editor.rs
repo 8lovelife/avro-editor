@@ -1,12 +1,19 @@
 use crate::data::types::EditValue;
-use crate::schema::parser::generate_default_value;
+use crate::schema::parser::{collect_named_schemas, generate_default_value};
 use crate::state::app_state::AppState;
 use apache_avro::Schema;
+use apache_avro::schema::Name;
 use eframe::egui;
+use std::collections::HashMap;
 
 pub fn render_root_list(ui: &mut egui::Ui, state: &mut AppState) {
+    // // Generate the schema lookup map once for the current UI tick
+    // let mut lookup = HashMap::new();
+    // collect_named_schemas(&state.schema, &mut lookup);
+
     if ui.button("➕ Add New Record").clicked() {
-        let new_record = generate_default_value(&state.schema);
+        // let new_record = generate_default_value(&state.schema, &lookup);
+        let new_record = generate_default_value(&state.schema, &state.schema_lookup);
         state.root_records.push(new_record);
     }
 
@@ -22,7 +29,14 @@ pub fn render_root_list(ui: &mut egui::Ui, state: &mut AppState) {
             }
         });
 
-        render_editor(ui, &state.schema, record, &format!("idx_{}", idx));
+        // render_editor(ui, &state.schema, record, &format!("idx_{}", idx), &lookup);
+        render_editor(
+            ui,
+            &state.schema,
+            record,
+            &format!("idx_{}", idx),
+            &state.schema_lookup,
+        );
         ui.add_space(10.0);
         ui.separator();
     }
@@ -32,14 +46,32 @@ pub fn render_root_list(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
-pub fn render_editor(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, label: &str) {
+pub fn render_editor(
+    ui: &mut egui::Ui,
+    schema: &Schema,
+    value: &mut EditValue,
+    label: &str,
+    lookup: &HashMap<Name, Schema>,
+) {
     ui.push_id(label, |ui| {
-        render_editor_body(ui, schema, value, label);
+        render_editor_body(ui, schema, value, label, lookup);
     });
 }
 
-fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue, label: &str) {
-    match (schema, value) {
+fn render_editor_body(
+    ui: &mut egui::Ui,
+    schema: &Schema,
+    value: &mut EditValue,
+    label: &str,
+    lookup: &HashMap<Name, Schema>,
+) {
+    // Attempt to resolve Schema::Ref directly before rendering
+    let effective_schema = match schema {
+        Schema::Ref { name } => lookup.get(name).unwrap_or(schema),
+        _ => schema,
+    };
+
+    match (effective_schema, value) {
         (Schema::String, EditValue::String(s)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", label));
@@ -88,7 +120,7 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
                 egui::ComboBox::from_id_salt(ui.id())
                     .selected_text(sym_val.as_str())
                     .show_ui(ui, |ui| {
-                        if let Schema::Enum(es) = schema {
+                        if let Schema::Enum(es) = effective_schema {
                             for (i, sym) in es.symbols.iter().enumerate() {
                                 if ui.selectable_value(index, i, sym).clicked() {
                                     *sym_val = sym.clone();
@@ -108,7 +140,6 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
             },
         ) => {
             ui.horizontal(|ui| {
-                // ui.label("");
                 ui.label(format!("| {}:", label));
                 let mut selected = *index;
                 egui::ComboBox::from_id_salt(ui.id())
@@ -122,12 +153,12 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
                 if selected != *index {
                     *index = selected;
                     let new_variant_schema = union_schema.variants()[selected].clone();
-                    *inner_val = Box::new(generate_default_value(&new_variant_schema));
+                    *inner_val = Box::new(generate_default_value(&new_variant_schema, lookup));
                     *inner_schema = new_variant_schema;
                 }
             });
             ui.indent(label, |ui| {
-                render_editor(ui, inner_schema, inner_val, "Value");
+                render_editor(ui, inner_schema, inner_val, "Value", lookup);
             });
         }
 
@@ -139,7 +170,7 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
                     for (field_schema, (f_name, f_val)) in
                         rect_schema.fields.iter().zip(fields.iter_mut())
                     {
-                        render_editor(ui, &field_schema.schema, f_val, f_name);
+                        render_editor(ui, &field_schema.schema, f_val, f_name, lookup);
                     }
                 });
         }
@@ -155,14 +186,20 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
                             if ui.button("❌").clicked() {
                                 to_remove = Some(idx);
                             }
-                            render_editor(ui, &arr_schema.items, item, &format!("[{}]", idx));
+                            render_editor(
+                                ui,
+                                &arr_schema.items,
+                                item,
+                                &format!("[{}]", idx),
+                                lookup,
+                            );
                         });
                     }
                     if let Some(idx) = to_remove {
                         items.remove(idx);
                     }
                     if ui.button("➕ Add").clicked() {
-                        items.push(generate_default_value(&arr_schema.items));
+                        items.push(generate_default_value(&arr_schema.items, lookup));
                     }
                 });
         }
@@ -176,7 +213,7 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
                     for (i, (key, val)) in kvs.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             ui.text_edit_singleline(key);
-                            render_editor(ui, &map_schema.types, val, &format!("[{}]", i));
+                            render_editor(ui, &map_schema.types, val, &format!("[{}]", i), lookup);
                             if ui.button("🗑").clicked() {
                                 to_remove = Some(i);
                             }
@@ -188,7 +225,7 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
                     if ui.button("➕ Add Entry").clicked() {
                         kvs.push((
                             "new_key".to_string(),
-                            generate_default_value(&map_schema.types),
+                            generate_default_value(&map_schema.types, lookup),
                         ));
                     }
                 });
@@ -232,7 +269,6 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
             });
         }
 
-        // int + logicalType: date -> Schema::Date
         (Schema::Date, EditValue::Date(days)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{} (date, epoch days):", label));
@@ -240,7 +276,6 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
             });
         }
 
-        // int + logicalType: time-millis -> Schema::TimeMillis
         (Schema::TimeMillis, EditValue::TimeMillis(ms)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{} (time-millis):", label));
@@ -248,7 +283,6 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
             });
         }
 
-        // long + logicalType: time-micros -> Schema::TimeMicros
         (Schema::TimeMicros, EditValue::TimeMicros(us)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{} (time-micros):", label));
@@ -256,7 +290,6 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
             });
         }
 
-        // long + logicalType: timestamp-millis -> Schema::TimestampMillis
         (Schema::TimestampMillis, EditValue::TimestampMillis(ms)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{} (timestamp-millis):", label));
@@ -264,7 +297,6 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
             });
         }
 
-        // long + logicalType: timestamp-micros -> Schema::TimestampMicros
         (Schema::TimestampMicros, EditValue::TimestampMicros(us)) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{} (timestamp-micros):", label));
@@ -272,7 +304,6 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
             });
         }
 
-        // fixed(size=12) + logicalType: duration -> Schema::Duration
         (Schema::Duration, EditValue::Duration(bytes)) => {
             ui.vertical(|ui| {
                 ui.label(format!("{} (duration, 12 bytes):", label));
@@ -301,7 +332,6 @@ fn render_editor_body(ui: &mut egui::Ui, schema: &Schema, value: &mut EditValue,
             });
         }
 
-        // bytes/fixed + logicalType: decimal -> Schema::Decimal(DecimalSchema)
         (Schema::Decimal(decimal_schema), EditValue::Decimal(bytes)) => {
             ui.label(format!(
                 "{} (decimal, precision={}, scale={}): [{} bytes]",
