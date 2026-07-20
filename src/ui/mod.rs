@@ -4,7 +4,7 @@ pub mod schema_explorer;
 
 use crate::data::avro_io;
 use crate::data::avro_io::generate_filename;
-use crate::schema::{self, parser};
+use crate::schema::parser;
 use crate::state::app_state::AppState;
 use apache_avro::Schema;
 use eframe::egui;

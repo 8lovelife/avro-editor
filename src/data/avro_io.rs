@@ -1,5 +1,6 @@
 use crate::schema::parser;
 use crate::state::app_state::AppState;
+use crate::ui::schema_explorer;
 use apache_avro::Reader;
 use rand::distr::{Alphanumeric, SampleString};
 use std::collections::HashMap;
@@ -24,10 +25,16 @@ pub fn import_from_avro_at_path(state: &mut AppState, path: PathBuf) -> Result<S
         records.push(parser::from_avro_value(&value, &schema, &lookup));
     }
 
+    // Convert schema to json value and build the registry for UI rendering
+    let schema_json = serde_json::to_value(&schema).unwrap_or_default();
+    let mut registry = HashMap::new();
+    schema_explorer::build_type_registry(&schema_json, &mut registry, "");
+
     let count = records.len();
     state.schema = schema;
     state.root_records = records;
     state.schema_lookup = lookup;
+    state.schema_json_registry = registry;
 
     let file_name = path
         .file_name()

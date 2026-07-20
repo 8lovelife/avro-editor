@@ -7,22 +7,17 @@ pub fn render_schema_panel(ui: &mut egui::Ui, state: &crate::state::app_state::A
     ui.heading("Schema (.avsc)");
     ui.separator();
 
-    // 1. Convert the current Schema into a serde_json::Value.
+    // Convert the current Schema into a serde_json::Value.
     let schema_json = serde_json::to_value(&state.schema)
         .unwrap_or_else(|_| serde_json::json!({ "error": "Could not serialize schema" }));
 
-    // 2. Build a registry of all named types (records, enums, fixed).
-    let mut registry = HashMap::new();
-    build_type_registry(&schema_json, &mut registry, "");
-
-    // 3. Render the tree.
     egui::ScrollArea::vertical().show(ui, |ui| {
-        render_schema_tree(ui, "Root", &schema_json, &registry, "");
+        render_schema_tree(ui, "Root", &schema_json, &state.schema_json_registry, "");
     });
 }
 
 /// Recursively scans the JSON value and stores any named types into a HashMap.
-fn build_type_registry(
+pub fn build_type_registry(
     value: &Value,
     registry: &mut HashMap<String, Value>,
     current_namespace: &str,
