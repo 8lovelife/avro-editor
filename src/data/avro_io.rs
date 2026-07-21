@@ -1,9 +1,7 @@
 use crate::schema::parser;
 use crate::state::app_state::AppState;
-use crate::ui::schema_explorer;
 use apache_avro::Reader;
 use rand::distr::{Alphanumeric, SampleString};
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -14,27 +12,23 @@ pub fn import_from_avro_at_path(state: &mut AppState, path: PathBuf) -> Result<S
         .map_err(|e| format!("Failed to read avro file: {}", e))?;
 
     let schema = reader.writer_schema().clone();
-
-    // Build the schema lookup map to resolve recursive/reference structures
-    let mut lookup = HashMap::new();
-    parser::collect_named_schemas(&schema, &mut lookup);
+    let schema_info = parser::build_schema_info(&schema);
 
     let mut records = Vec::new();
     for value_result in reader {
         let value = value_result.map_err(|e| format!("Failed to read avro records: {}", e))?;
-        records.push(parser::from_avro_value(&value, &schema, &lookup));
+        records.push(parser::from_avro_value(
+            &value,
+            &schema,
+            &schema_info.schema_lookup,
+        ));
     }
-
-    // Convert schema to json value and build the registry for UI rendering
-    let schema_json = serde_json::to_value(&schema).unwrap_or_default();
-    let mut registry = HashMap::new();
-    schema_explorer::build_type_registry(&schema_json, &mut registry, "");
 
     let count = records.len();
     state.schema = schema;
     state.root_records = records;
-    state.schema_lookup = lookup;
-    state.schema_json_registry = registry;
+    state.schema_lookup = schema_info.schema_lookup;
+    state.schema_json_registry = schema_info.schema_json_registry;
 
     let file_name = path
         .file_name()

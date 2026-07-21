@@ -11,48 +11,11 @@ pub fn render_schema_panel(ui: &mut egui::Ui, state: &crate::state::app_state::A
     let schema_json = serde_json::to_value(&state.schema)
         .unwrap_or_else(|_| serde_json::json!({ "error": "Could not serialize schema" }));
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        render_schema_tree(ui, "Root", &schema_json, &state.schema_json_registry, "");
-    });
-}
-
-/// Recursively scans the JSON value and stores any named types into a HashMap.
-pub fn build_type_registry(
-    value: &Value,
-    registry: &mut HashMap<String, Value>,
-    current_namespace: &str,
-) {
-    match value {
-        Value::Object(map) => {
-            let next_namespace = map
-                .get("namespace")
-                .and_then(|v| v.as_str())
-                .unwrap_or(current_namespace);
-
-            if let (Some(Value::String(name)), Some(Value::String(type_str))) =
-                (map.get("name"), map.get("type"))
-            {
-                if type_str == "record" || type_str == "enum" || type_str == "fixed" {
-                    let full_name = if next_namespace.is_empty() || name.contains('.') {
-                        name.clone()
-                    } else {
-                        format!("{}.{}", next_namespace, name)
-                    };
-                    registry.insert(full_name, value.clone());
-                }
-            }
-
-            for v in map.values() {
-                build_type_registry(v, registry, next_namespace);
-            }
-        }
-        Value::Array(arr) => {
-            for v in arr {
-                build_type_registry(v, registry, current_namespace);
-            }
-        }
-        _ => {}
-    }
+    egui::ScrollArea::both()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            render_schema_tree(ui, "Root", &schema_json, &state.schema_json_registry, "");
+        });
 }
 
 /// Recursively renders the schema tree.

@@ -49,13 +49,16 @@ pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
                                 match Schema::parse_str(&content) {
                                     Ok(new_schema) => {
                                         // Successfully parsed! Update the application state
-                                        state.schema = new_schema.clone();
-                                        let mut lookup = HashMap::new();
-                                        parser::collect_named_schemas(&new_schema, &mut lookup);
-                                        let initial_record =
-                                            parser::generate_default_value(&state.schema, &lookup);
+                                        let schema_info = parser::build_schema_info(&new_schema);
+                                        let initial_record = parser::generate_default_value(
+                                            &new_schema,
+                                            &schema_info.schema_lookup,
+                                        );
+                                        state.schema = new_schema;
                                         state.root_records = vec![initial_record];
-
+                                        state.schema_lookup = schema_info.schema_lookup;
+                                        state.schema_json_registry =
+                                            schema_info.schema_json_registry;
                                         // Notify user of success
                                         let file_name =
                                             path.file_name().unwrap_or_default().to_string_lossy();
@@ -102,24 +105,16 @@ pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
         });
     });
 
-    egui::SidePanel::left("schema_panel")
-        // .min_width(300.0)
-        .show(ctx, |ui| {
-            egui::ScrollArea::both()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    schema_explorer::render_schema_panel(ui, state);
-                });
-        });
+    egui::SidePanel::left("schema_panel").show(ctx, |ui| {
+        schema_explorer::render_schema_panel(ui, state);
+    });
 
     egui::SidePanel::right("preview_panel").show(ctx, |ui| {
         record_preview::render_preview_panel(ui, state);
     });
 
     egui::CentralPanel::default().show(ctx, |ui| {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            record_editor::render_root_list(ui, state);
-        });
+        record_editor::render_root_list(ui, state);
     });
 
     if let Some(msg) = &state.toast_message {

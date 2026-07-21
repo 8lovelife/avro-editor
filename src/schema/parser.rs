@@ -1,4 +1,5 @@
 use crate::data::types::EditValue;
+use crate::schema::schema_info::SchemaInfo;
 use apache_avro::Schema;
 use apache_avro::schema::Name;
 use apache_avro::types::Value;
@@ -8,6 +9,46 @@ const RAW_SCHEMA: &str = include_str!("sample_schema.avsc");
 
 pub fn get_schema() -> Schema {
     Schema::parse_str(RAW_SCHEMA).expect("Failed to parse schema from file")
+}
+
+pub fn build_type_registry(
+    value: &serde_json::Value,
+    registry: &mut HashMap<String, serde_json::Value>,
+    current_namespace: &str,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            let next_namespace = map
+                .get("namespace")
+                .and_then(|v| v.as_str())
+                .unwrap_or(current_namespace);
+
+            if let (
+                Some(serde_json::Value::String(name)),
+                Some(serde_json::Value::String(type_str)),
+            ) = (map.get("name"), map.get("type"))
+            {
+                if type_str == "record" || type_str == "enum" || type_str == "fixed" {
+                    let full_name = if next_namespace.is_empty() || name.contains('.') {
+                        name.clone()
+                    } else {
+                        format!("{}.{}", next_namespace, name)
+                    };
+                    registry.insert(full_name, value.clone());
+                }
+            }
+
+            for v in map.values() {
+                build_type_registry(v, registry, next_namespace);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                build_type_registry(v, registry, current_namespace);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Recursively builds a lookup table of all named schemas (Records, Enums, Fixed)
@@ -226,5 +267,20 @@ pub fn from_avro_value(
             );
             generate_default_value(schema, lookup)
         }
+    }
+}
+
+pub fn build_schema_info(schema: &Schema) -> SchemaInfo {
+    // Build the schema lookup map to resolve recursive/reference structures
+    let mut schema_lookup = HashMap::new();
+    collect_named_schemas(&schema, &mut schema_lookup);
+
+    let schema_json = serde_json::to_value(&schema).unwrap_or_default();
+    let mut schema_json_registry = HashMap::new();
+    build_type_registry(&schema_json, &mut schema_json_registry, "");
+
+    SchemaInfo {
+        schema_lookup,
+        schema_json_registry,
     }
 }

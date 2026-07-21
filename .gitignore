@@ -2,3 +2,4 @@ target/
 *.avro
 Cargo.lock
 .DS_Store
+*.avsc

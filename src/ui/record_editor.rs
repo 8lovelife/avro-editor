@@ -1,5 +1,5 @@
 use crate::data::types::EditValue;
-use crate::schema::parser::{collect_named_schemas, generate_default_value};
+use crate::schema::parser::generate_default_value;
 use crate::state::app_state::AppState;
 use apache_avro::Schema;
 use apache_avro::schema::Name;
@@ -7,43 +7,53 @@ use eframe::egui;
 use std::collections::HashMap;
 
 pub fn render_root_list(ui: &mut egui::Ui, state: &mut AppState) {
-    // // Generate the schema lookup map once for the current UI tick
-    // let mut lookup = HashMap::new();
-    // collect_named_schemas(&state.schema, &mut lookup);
+    ui.horizontal(|ui| {
+        if ui.button("➕ Add New Record").clicked() {
+            let new_record = generate_default_value(&state.schema, &state.schema_lookup);
+            state.root_records.push(new_record);
+        }
 
-    if ui.button("➕ Add New Record").clicked() {
-        // let new_record = generate_default_value(&state.schema, &lookup);
-        let new_record = generate_default_value(&state.schema, &state.schema_lookup);
-        state.root_records.push(new_record);
-    }
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            let count = state.root_records.len();
+            ui.label(
+                egui::RichText::new(format!("Total Records: {}", count))
+                    .strong()
+                    .color(egui::Color32::GRAY),
+            );
+        });
+    });
 
     ui.separator();
 
-    let mut to_remove = None;
+    egui::ScrollArea::both()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let mut to_remove = None;
 
-    for (idx, record) in state.root_records.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
-            ui.label(format!("Record #{}", idx + 1));
-            if ui.button("🗑 Delete").clicked() {
-                to_remove = Some(idx);
+            for (idx, record) in state.root_records.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Record #{}", idx + 1));
+                    if ui.button("🗑 Delete").clicked() {
+                        to_remove = Some(idx);
+                    }
+                });
+
+                // render_editor(ui, &state.schema, record, &format!("idx_{}", idx), &lookup);
+                render_editor(
+                    ui,
+                    &state.schema,
+                    record,
+                    &format!("idx_{}", idx),
+                    &state.schema_lookup,
+                );
+                ui.add_space(10.0);
+                ui.separator();
+            }
+
+            if let Some(idx) = to_remove {
+                state.root_records.remove(idx);
             }
         });
-
-        // render_editor(ui, &state.schema, record, &format!("idx_{}", idx), &lookup);
-        render_editor(
-            ui,
-            &state.schema,
-            record,
-            &format!("idx_{}", idx),
-            &state.schema_lookup,
-        );
-        ui.add_space(10.0);
-        ui.separator();
-    }
-
-    if let Some(idx) = to_remove {
-        state.root_records.remove(idx);
-    }
 }
 
 pub fn render_editor(
@@ -343,7 +353,7 @@ fn render_editor_body(
         }
 
         _ => {
-            ui.label(egui::RichText::new("⚠️ Type Mismatch").color(egui::Color32::YELLOW));
+            ui.label(egui::RichText::new("Type Mismatch").color(egui::Color32::YELLOW));
         }
     }
 }
