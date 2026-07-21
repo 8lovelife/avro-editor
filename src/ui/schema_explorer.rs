@@ -2,20 +2,72 @@ use eframe::egui;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Renders the Schema panel as a collapsible tree structure.
-pub fn render_schema_panel(ui: &mut egui::Ui, state: &crate::state::app_state::AppState) {
-    ui.heading("Schema (.avsc)");
-    ui.separator();
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SchemaViewMode {
+    Tree,
+    Text,
+}
 
-    // Convert the current Schema into a serde_json::Value.
+pub fn render_schema_panel(ui: &mut egui::Ui, state: &crate::state::app_state::AppState) {
+    let view_mode_id = ui.id().with("schema_view_mode");
+    let mut view_mode = ui
+        .data(|d| d.get_temp::<SchemaViewMode>(view_mode_id))
+        .unwrap_or(SchemaViewMode::Tree);
+
     let schema_json = serde_json::to_value(&state.schema)
         .unwrap_or_else(|_| serde_json::json!({ "error": "Could not serialize schema" }));
 
-    egui::ScrollArea::both()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            render_schema_tree(ui, "Root", &schema_json, &state.schema_json_registry, "");
+    ui.horizontal(|ui| {
+        ui.heading("Schema (.avsc)");
+
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            if ui
+                .selectable_label(view_mode == SchemaViewMode::Tree, "Tree")
+                .clicked()
+            {
+                view_mode = SchemaViewMode::Tree;
+            }
+            if ui
+                .selectable_label(view_mode == SchemaViewMode::Text, "Text")
+                .clicked()
+            {
+                view_mode = SchemaViewMode::Text;
+            }
+            ui.data_mut(|d| d.insert_temp(view_mode_id, view_mode));
+
+            ui.separator();
+
+            if ui.button("📋 Copy").clicked() {
+                let text = serde_json::to_string_pretty(&schema_json).unwrap_or_default();
+                ui.ctx().copy_text(text);
+            }
         });
+    });
+    ui.separator();
+
+    match view_mode {
+        SchemaViewMode::Tree => {
+            egui::ScrollArea::both()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    render_schema_tree(ui, "Root", &schema_json, &state.schema_json_registry, "");
+                });
+        }
+        SchemaViewMode::Text => {
+            let text = serde_json::to_string_pretty(&schema_json).unwrap_or_default();
+
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut text.as_str())
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(ui.available_width()),
+                    );
+                });
+        }
+    }
 }
 
 /// Recursively renders the schema tree.

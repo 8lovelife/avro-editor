@@ -7,12 +7,14 @@ use eframe::egui;
 use std::collections::HashMap;
 
 pub fn render_root_list(ui: &mut egui::Ui, state: &mut AppState) {
+    let mut scroll_to_new_record = false;
+
     ui.horizontal(|ui| {
         if ui.button("➕ Add New Record").clicked() {
             let new_record = generate_default_value(&state.schema, &state.schema_lookup);
             state.root_records.push(new_record);
+            scroll_to_new_record = true;
         }
-
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             let count = state.root_records.len();
             ui.label(
@@ -22,23 +24,28 @@ pub fn render_root_list(ui: &mut egui::Ui, state: &mut AppState) {
             );
         });
     });
-
     ui.separator();
 
     egui::ScrollArea::both()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let mut to_remove = None;
+            let last_idx = state.root_records.len().saturating_sub(1);
 
             for (idx, record) in state.root_records.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("Record #{}", idx + 1));
-                    if ui.button("🗑 Delete").clicked() {
-                        to_remove = Some(idx);
-                    }
-                });
+                let header_response = ui
+                    .horizontal(|ui| {
+                        ui.label(format!("Record #{}", idx + 1));
+                        if ui.button("🗑 Delete").clicked() {
+                            to_remove = Some(idx);
+                        }
+                    })
+                    .response;
 
-                // render_editor(ui, &state.schema, record, &format!("idx_{}", idx), &lookup);
+                if scroll_to_new_record && idx == last_idx {
+                    header_response.scroll_to_me(Some(egui::Align::TOP));
+                }
+
                 render_editor(
                     ui,
                     &state.schema,

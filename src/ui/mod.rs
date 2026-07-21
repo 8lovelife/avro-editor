@@ -9,7 +9,6 @@ use crate::state::app_state::AppState;
 use apache_avro::Schema;
 use eframe::egui;
 use rfd::FileDialog;
-use std::collections::HashMap;
 use std::fs;
 
 pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
