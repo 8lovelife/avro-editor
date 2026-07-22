@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 
+#[allow(dead_code)]
 pub fn import_from_avro_at_path(state: &mut AppState, path: PathBuf) -> Result<String, String> {
     let file = File::open(&path).map_err(|e| format!("Failed to open avro file: {}", e))?;
     let reader = Reader::new(BufReader::new(file))
@@ -37,6 +38,7 @@ pub fn import_from_avro_at_path(state: &mut AppState, path: PathBuf) -> Result<S
     Ok(format!("{} ({} records)", file_name, count))
 }
 
+#[allow(dead_code)]
 pub fn export_to_avro_at_path(state: &AppState, path: PathBuf) -> Result<String, String> {
     let avro_values: Vec<_> = state
         .root_records
@@ -50,6 +52,44 @@ pub fn export_to_avro_at_path(state: &AppState, path: PathBuf) -> Result<String,
     let result = writer.into_inner().map_err(|e| e.to_string())?;
     std::fs::write(&path, result).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+pub fn import_from_avro_bytes(state: &mut AppState, bytes: &[u8]) -> Result<usize, String> {
+    let reader = Reader::new(bytes).map_err(|e| format!("Failed to read avro file: {}", e))?;
+
+    let schema = reader.writer_schema().clone();
+    let schema_info = parser::build_schema_info(&schema);
+
+    let mut records = Vec::new();
+    for value_result in reader {
+        let value = value_result.map_err(|e| format!("Failed to read avro records: {}", e))?;
+        records.push(parser::from_avro_value(
+            &value,
+            &schema,
+            &schema_info.schema_lookup,
+        ));
+    }
+
+    let count = records.len();
+    state.schema = schema;
+    state.root_records = records;
+    state.schema_lookup = schema_info.schema_lookup;
+    state.schema_json_registry = schema_info.schema_json_registry;
+
+    Ok(count)
+}
+
+pub fn encode_avro_bytes(state: &AppState) -> Result<Vec<u8>, String> {
+    let avro_values: Vec<_> = state
+        .root_records
+        .iter()
+        .map(|record| record.to_avro_value())
+        .collect();
+    let mut writer = apache_avro::Writer::new(&state.schema, Vec::new());
+    for val in avro_values {
+        writer.append(val).map_err(|e| e.to_string())?;
+    }
+    writer.into_inner().map_err(|e| e.to_string())
 }
 
 pub fn generate_filename() -> String {

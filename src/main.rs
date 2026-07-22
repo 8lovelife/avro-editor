@@ -1,41 +1,47 @@
-mod data;
-mod schema;
-mod state;
-mod ui;
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use crate::schema::parser;
-use crate::schema::parser::generate_default_value;
-use crate::schema::parser::*;
-use crate::state::app_state::AppState;
-use eframe::egui;
+use avro_editor_lib::AvroEditorApp;
 
-struct AvroEditorApp {
-    state: AppState,
-}
-
-impl eframe::App for AvroEditorApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ui::render_main_ui(ctx, &mut self.state);
-    }
-}
-
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
-    let schema = get_schema();
-    let schema_info = parser::build_schema_info(&schema);
-    let initial_record = generate_default_value(&schema, &schema_info.schema_lookup);
-    let root_records = vec![initial_record];
-
-    let state = AppState {
-        schema,
-        root_records,
-        schema_lookup: schema_info.schema_lookup,
-        schema_json_registry: schema_info.schema_json_registry,
-        toast_message: None,
-        toast_timer: 0.0,
-    };
+    env_logger::init();
     eframe::run_native(
         "Avro Editor",
         eframe::NativeOptions::default(),
-        Box::new(|_cc| Ok(Box::new(AvroEditorApp { state }))),
+        Box::new(|cc| Ok(Box::new(AvroEditorApp::new(cc)))),
     )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    use eframe::wasm_bindgen::JsCast;
+    eframe::WebLogger::init(log::LevelFilter::Debug).ok();
+    let web_options = eframe::WebOptions::default();
+    wasm_bindgen_futures::spawn_local(async {
+        let document = web_sys::window()
+            .expect("No window")
+            .document()
+            .expect("No document");
+        let canvas = document
+            .get_element_by_id("the_canvas_id")
+            .expect("Failed to find the_canvas_id")
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .expect("the_canvas_id was not a HtmlCanvasElement");
+        let start_result = eframe::WebRunner::new()
+            .start(
+                canvas,
+                web_options,
+                Box::new(|cc| Ok(Box::new(AvroEditorApp::new(cc)))),
+            )
+            .await;
+        if let Some(loading_text) = document.get_element_by_id("loading_text") {
+            match start_result {
+                Ok(_) => loading_text.remove(),
+                Err(e) => {
+                    loading_text.set_inner_html("<p>Failed to start, check the console</p>");
+                    panic!("Failed to start eframe: {e:?}");
+                }
+            }
+        }
+    });
 }

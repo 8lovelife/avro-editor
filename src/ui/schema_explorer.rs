@@ -194,7 +194,7 @@ fn render_schema_tree(
         Value::Bool(b) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", label));
-                ui.colored_label(egui::Color32::YELLOW, b.to_string());
+                ui.colored_label(egui::Color32::from_rgb(79, 193, 255), b.to_string());
             });
         }
         Value::Null => {

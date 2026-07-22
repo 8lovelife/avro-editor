@@ -174,7 +174,7 @@ fn render_json_node_body(ui: &mut egui::Ui, label: &str, value: &serde_json::Val
         serde_json::Value::Bool(b) => {
             ui.horizontal(|ui| {
                 ui.label(format!("{}:", label));
-                ui.colored_label(egui::Color32::LIGHT_GREEN, b.to_string());
+                ui.colored_label(egui::Color32::from_rgb(79, 193, 255), b.to_string());
             });
         }
         serde_json::Value::Null => {

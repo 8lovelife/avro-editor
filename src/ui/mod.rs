@@ -4,12 +4,11 @@ pub mod schema_explorer;
 
 use crate::data::avro_io;
 use crate::data::avro_io::generate_filename;
+use crate::data::platform;
 use crate::schema::parser;
-use crate::state::app_state::AppState;
+use crate::state::app_state::{AppState, PendingFileOp};
 use apache_avro::Schema;
 use eframe::egui;
-use rfd::FileDialog;
-use std::fs;
 
 pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
     egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
@@ -17,88 +16,45 @@ pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
             ui.heading("🛠 Schema-Driven Avro Editor");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("💾 Export Avro file to...").clicked() {
-                    if let Some(path) = FileDialog::new()
-                        .set_file_name(generate_filename())
-                        .add_filter("Avro", &["avro"])
-                        .save_file()
-                    {
-                        match avro_io::export_to_avro_at_path(state, path) {
-                            Ok(p) => {
-                                state.toast_message = Some(format!("✅ Saved to: {}", p));
-                                state.toast_timer = 3.0;
-                            }
-                            Err(e) => {
-                                state.toast_message = Some(format!("❌ Error: {}", e));
-                                state.toast_timer = 5.0;
-                            }
+                    match avro_io::encode_avro_bytes(state) {
+                        Ok(data) => {
+                            platform::save(
+                                generate_filename(),
+                                "Avro",
+                                &["avro"],
+                                data,
+                                state.pending_op.clone(),
+                                ctx,
+                            );
+                        }
+                        Err(e) => {
+                            state.toast_message = Some(format!("❌ Error: {}", e));
+                            state.toast_timer = 5.0;
                         }
                     }
                 }
 
                 if ui.button("📂 Load Custom Schema (.avsc)").clicked() {
-                    // 1. Pop up a file picker, restricted to .avsc or .json files
-                    if let Some(path) = FileDialog::new()
-                        .add_filter("Avro Schema", &["avsc", "json"])
-                        .pick_file()
-                    {
-                        // 2. Attempt to read the file content
-                        match fs::read_to_string(&path) {
-                            Ok(content) => {
-                                // 3. Attempt to parse into apache_avro::Schema
-                                match Schema::parse_str(&content) {
-                                    Ok(new_schema) => {
-                                        // Successfully parsed! Update the application state
-                                        let schema_info = parser::build_schema_info(&new_schema);
-                                        let initial_record = parser::generate_default_value(
-                                            &new_schema,
-                                            &schema_info.schema_lookup,
-                                        );
-                                        state.schema = new_schema;
-                                        state.root_records = vec![initial_record];
-                                        state.schema_lookup = schema_info.schema_lookup;
-                                        state.schema_json_registry =
-                                            schema_info.schema_json_registry;
-                                        // Notify user of success
-                                        let file_name =
-                                            path.file_name().unwrap_or_default().to_string_lossy();
-                                        state.toast_message =
-                                            Some(format!("✅ Schema Loaded: {}", file_name));
-                                        state.toast_timer = 3.0;
-                                    }
-                                    Err(e) => {
-                                        // Parsing failed (e.g., malformed JSON or violates Avro specs)
-                                        state.toast_message =
-                                            Some(format!("❌ Invalid Schema: {}", e));
-                                        state.toast_timer = 5.0;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                // File read failed (e.g., permission issues)
-                                state.toast_message = Some(format!("Failed to read file: {}", e));
-                                state.toast_timer = 5.0;
-                            }
-                        }
-                    }
+                    platform::pick_and_read(
+                        "Avro Schema",
+                        &["avsc", "json"],
+                        state.pending_op.clone(),
+                        |filename, bytes| match String::from_utf8(bytes) {
+                            Ok(content) => PendingFileOp::SchemaLoaded { filename, content },
+                            Err(e) => PendingFileOp::Failed(format!("Invalid UTF-8: {e}")),
+                        },
+                        ctx,
+                    );
                 }
 
                 if ui.button("📥 Load Avro File (.avro)").clicked() {
-                    if let Some(path) = FileDialog::new()
-                        .add_filter("Avro Data", &["avro"])
-                        .pick_file()
-                    {
-                        match avro_io::import_from_avro_at_path(state, path) {
-                            Ok(summary) => {
-                                state.toast_message = Some(format!("✅ Avro Loaded: {}", summary));
-                                state.toast_timer = 3.0;
-                            }
-                            Err(e) => {
-                                state.toast_message =
-                                    Some(format!("❌ Failed to load avro: {}", e));
-                                state.toast_timer = 5.0;
-                            }
-                        }
-                    }
+                    platform::pick_and_read(
+                        "Avro Data",
+                        &["avro"],
+                        state.pending_op.clone(),
+                        |filename, bytes| PendingFileOp::RawAvroLoaded { filename, bytes },
+                        ctx,
+                    );
                 }
             });
         });
@@ -115,6 +71,52 @@ pub fn render_main_ui(ctx: &egui::Context, state: &mut AppState) {
     egui::CentralPanel::default().show(ctx, |ui| {
         record_editor::render_root_list(ui, state);
     });
+
+    let finished_op = state.pending_op.lock().unwrap().take();
+    if let Some(op) = finished_op {
+        match op {
+            PendingFileOp::SchemaLoaded { filename, content } => {
+                match Schema::parse_str(&content) {
+                    Ok(new_schema) => {
+                        let schema_info = parser::build_schema_info(&new_schema);
+                        let initial_record =
+                            parser::generate_default_value(&new_schema, &schema_info.schema_lookup);
+                        state.schema = new_schema;
+                        state.root_records = vec![initial_record];
+                        state.schema_lookup = schema_info.schema_lookup;
+                        state.schema_json_registry = schema_info.schema_json_registry;
+                        state.toast_message = Some(format!("✅ Schema Loaded: {}", filename));
+                        state.toast_timer = 3.0;
+                    }
+                    Err(e) => {
+                        state.toast_message = Some(format!("❌ Invalid Schema: {}", e));
+                        state.toast_timer = 5.0;
+                    }
+                }
+            }
+            PendingFileOp::RawAvroLoaded { filename, bytes } => {
+                match avro_io::import_from_avro_bytes(state, &bytes) {
+                    Ok(count) => {
+                        state.toast_message =
+                            Some(format!("✅ Avro Loaded: {} ({} records)", filename, count));
+                        state.toast_timer = 3.0;
+                    }
+                    Err(e) => {
+                        state.toast_message = Some(format!("❌ Failed to load avro: {}", e));
+                        state.toast_timer = 5.0;
+                    }
+                }
+            }
+            PendingFileOp::ExportDone { filename } => {
+                state.toast_message = Some(format!("✅ Saved: {}", filename));
+                state.toast_timer = 3.0;
+            }
+            PendingFileOp::Failed(e) => {
+                state.toast_message = Some(format!("❌ Error: {}", e));
+                state.toast_timer = 5.0;
+            }
+        }
+    }
 
     if let Some(msg) = &state.toast_message {
         egui::Window::new("ToastNotification")

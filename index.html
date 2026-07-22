@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Avro Editor</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                padding: 0;
+                height: 100%;
+                overflow: hidden;
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+        <link data-trunk rel="rust" data-bin="avro_editor" data-wasm-opt="2" />
+    </head>
+    <body>
+        <div id="loading_text"><p>Loading...</p></div>
+        <canvas id="the_canvas_id"></canvas>
+    </body>
+</html>

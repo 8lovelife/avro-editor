@@ -1,4 +1,5 @@
 pub mod avro_io;
+pub mod platform;
 pub mod types;
 
 #[cfg(test)]

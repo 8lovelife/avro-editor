@@ -1,4 +1,5 @@
 target/
+dist/
 *.avro
 Cargo.lock
 .DS_Store
