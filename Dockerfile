@@ -19,7 +19,7 @@ COPY index.html ./index.html
 RUN trunk build --release
 
 # ---------- Stage 2: serve with static-web-server ----------
-FROM joseluisq/static-web-server:2-alpine
+FROM joseluisq/static-web-server:2
 
 COPY --from=builder /app/dist /var/public
 

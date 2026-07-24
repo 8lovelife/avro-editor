@@ -11,7 +11,7 @@ pub fn render_preview_panel(ui: &mut egui::Ui, state: &AppState) {
     let view_mode_id = ui.id().with("preview_view_mode");
     let mut view_mode = ui
         .data(|d| d.get_temp::<ViewMode>(view_mode_id))
-        .unwrap_or(ViewMode::Json);
+        .unwrap_or(ViewMode::Tree);
 
     let json_array =
         serde_json::Value::Array(state.root_records.iter().map(|rec| rec.to_json()).collect());
@@ -21,17 +21,12 @@ pub fn render_preview_panel(ui: &mut egui::Ui, state: &AppState) {
 
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             if ui
-                .selectable_label(view_mode == ViewMode::Table, "Table")
-                .clicked()
-            {
-                view_mode = ViewMode::Table;
-            }
-            if ui
                 .selectable_label(view_mode == ViewMode::Tree, "Tree")
                 .clicked()
             {
                 view_mode = ViewMode::Tree;
             }
+
             if ui
                 .selectable_label(view_mode == ViewMode::Json, "JSON")
                 .clicked()
@@ -39,14 +34,14 @@ pub fn render_preview_panel(ui: &mut egui::Ui, state: &AppState) {
                 view_mode = ViewMode::Json;
             }
 
-            ui.data_mut(|d| d.insert_temp(view_mode_id, view_mode));
-
-            ui.separator();
-
-            if ui.button("📋 Copy").clicked() {
-                let json_data = serde_json::to_string_pretty(&json_array).unwrap_or_default();
-                ui.ctx().copy_text(json_data);
+            if ui
+                .selectable_label(view_mode == ViewMode::Table, "Table")
+                .clicked()
+            {
+                view_mode = ViewMode::Table;
             }
+
+            ui.data_mut(|d| d.insert_temp(view_mode_id, view_mode));
         });
     });
 
@@ -108,6 +103,27 @@ fn render_table_view(ui: &mut egui::Ui, json_array: &serde_json::Value) {
 // ========== Raw text JSON view ==========
 fn render_json_text_view(ui: &mut egui::Ui, json_array: &serde_json::Value) {
     let json_data = serde_json::to_string_pretty(json_array).unwrap_or_default();
+
+    ui.horizontal(|ui| {
+        if ui.button("📋 Copy JSON (Pretty)").clicked() {
+            ui.ctx().copy_text(json_data.clone());
+        }
+
+        if ui.button("📋 Copy JSON (Lines)").clicked() {
+            let compressed_data = if let Some(arr) = json_array.as_array() {
+                arr.iter()
+                    .filter_map(|val| serde_json::to_string(val).ok())
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            } else {
+                serde_json::to_string(json_array).unwrap_or_default()
+            };
+
+            ui.ctx().copy_text(compressed_data);
+        }
+    });
+
+    ui.add_space(4.0);
 
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
