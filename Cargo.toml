@@ -27,7 +27,7 @@ eframe = { version = "0.31", default-features = false, features = [
 env_logger = "0.11"
 egui = "0.31"
 log = "0.4.27"
-apache-avro = "0.21"
+apache-avro = { version = "0.21", features = ["snappy", "zstandard", "bzip", "xz"] } 
 serde_json = "1.0"
 chrono = "0.4.45"
 rand = { version = "0.10.2", features = ["std"] }
