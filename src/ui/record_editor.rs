@@ -30,12 +30,16 @@ pub fn render_root_list(ui: &mut egui::Ui, state: &mut AppState) {
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let mut to_remove = None;
+            let mut to_copy = None;
             let last_idx = state.root_records.len().saturating_sub(1);
 
             for (idx, record) in state.root_records.iter_mut().enumerate() {
                 let header_response = ui
                     .horizontal(|ui| {
                         ui.label(format!("Record #{}", idx + 1));
+                        if ui.button("📄 Copy").clicked() {
+                            to_copy = Some(idx);
+                        }
                         if ui.button("🗑 Delete").clicked() {
                             to_remove = Some(idx);
                         }
@@ -55,6 +59,12 @@ pub fn render_root_list(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 ui.add_space(10.0);
                 ui.separator();
+            }
+
+            if let Some(idx) = to_copy {
+                if let Some(record_to_clone) = state.root_records.get(idx).cloned() {
+                    state.root_records.push(record_to_clone);
+                }
             }
 
             if let Some(idx) = to_remove {
